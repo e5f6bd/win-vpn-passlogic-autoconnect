@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
     let matrix = Matrix::fetch(config.matrix_url)?;
     let password = config.password.generate(matrix);
     let exit_status = Command::new("rasdial.exe")
-        .args(dbg!([config.vpn_name, config.username, password]))
+        .args([config.vpn_name, config.username, password])
         .status()?;
     if !exit_status.success() {
         bail!("Process terminated with exit code {exit_status}");
