@@ -4,6 +4,8 @@ use anyhow::bail;
 use clap::Parser;
 use deranged::RangedU8;
 use itertools::Itertools;
+use lazy_format::lazy_format;
+use scraper::{Html, Selector};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
@@ -11,8 +13,9 @@ use url::Url;
 fn main() -> anyhow::Result<()> {
     let args = Opts::parse();
     let config: Config = toml::from_str(&fs_err::read_to_string(args.config_path)?)?;
-
-    println!("{config:?}");
+    let matrix = Matrix::fetch(config.matrix_url)?;
+    let password = config.password.generate(matrix);
+    println!("{password}");
     Ok(())
 }
 
@@ -33,14 +36,48 @@ struct Config {
 
 #[derive(Debug)]
 struct Password {
-    matrix_entries: [MatrixEntry; 8],
+    matrix_entries: [MatrixPosition; 8],
     suffix: String,
 }
 
-#[derive(Debug)]
-struct MatrixEntry {
+#[derive(Clone, Copy, Debug)]
+struct MatrixPosition {
     table: RangedU8<0, 3>,
     position: RangedU8<0, 16>,
+}
+
+type MatrixElement = RangedU8<0, 10>;
+#[derive(Debug)]
+struct Matrix([[MatrixElement; 16]; 3]);
+impl Matrix {
+    fn fetch(url: Url) -> anyhow::Result<Self> {
+        let client = reqwest::blocking::Client::new();
+        let html = Html::parse_document(&client.get(url).send()?.text()?);
+        Self::parse(&html)
+    }
+
+    fn parse(html: &Html) -> anyhow::Result<Self> {
+        let selector_table = Selector::parse("table.randamNumbarWidth").unwrap();
+        let selector_p = Selector::parse("p").unwrap();
+        Ok(Self(
+            html.select(&selector_table)
+                .map(|table| {
+                    table
+                        .select(&selector_p)
+                        .map(|e| e.text().collect::<String>().parse::<MatrixElement>())
+                        .collect::<Result<Vec<_>, _>>()?
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("The table do not have exactly 16 elements"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("There are not exactly three tables"))?,
+        ))
+    }
+
+    fn get(&self, key: MatrixPosition) -> MatrixElement {
+        self.0[key.table.get() as usize][key.position.get() as usize]
+    }
 }
 
 impl FromStr for Password {
@@ -59,7 +96,7 @@ impl FromStr for Password {
                     Some(x) => Ok(x as u8),
                     None => bail!("Failed to parse character {c:?} base {radix}"),
                 };
-                anyhow::Ok(MatrixEntry {
+                anyhow::Ok(MatrixPosition {
                     table: parse(x, 10)?.try_into()?,
                     position: parse(y, 16)?.try_into()?,
                 })
@@ -72,5 +109,12 @@ impl FromStr for Password {
             matrix_entries,
             suffix,
         })
+    }
+}
+
+impl Password {
+    fn generate(&self, matrix: Matrix) -> String {
+        let prefix = lazy_format!(("{}", matrix.get(key)) for key in self.matrix_entries);
+        format!("{prefix}{}", self.suffix)
     }
 }
