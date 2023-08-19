@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{path::PathBuf, process::Command, str::FromStr};
 
 use anyhow::bail;
 use clap::Parser;
@@ -15,7 +15,12 @@ fn main() -> anyhow::Result<()> {
     let config: Config = toml::from_str(&fs_err::read_to_string(args.config_path)?)?;
     let matrix = Matrix::fetch(config.matrix_url)?;
     let password = config.password.generate(matrix);
-    println!("{password}");
+    let exit_status = Command::new("rasdial.exe")
+        .args(dbg!([config.vpn_name, config.username, password]))
+        .status()?;
+    if !exit_status.success() {
+        bail!("Process terminated with exit code {exit_status}");
+    }
     Ok(())
 }
 
