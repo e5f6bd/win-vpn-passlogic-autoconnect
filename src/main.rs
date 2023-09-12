@@ -15,6 +15,17 @@ fn main() -> anyhow::Result<()> {
     let config: Config = toml::from_str(&fs_err::read_to_string(args.config_path)?)?;
     let matrix = Matrix::fetch(config.matrix_url)?;
     let password = config.password.generate(matrix);
+    if args.just_print_password {
+        println!("{password}");
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    let exit_status = Command::new("scutil")
+        .args(["--nc", "start", &config.vpn_name])
+        .args(["--password", &password])
+        .args(["--secret", &config.secret])
+        .status()?;
+    #[cfg(not(target_os = "macos"))]
     let exit_status = Command::new("rasdial.exe")
         .args([config.vpn_name, config.username, password])
         .status()?;
@@ -27,6 +38,8 @@ fn main() -> anyhow::Result<()> {
 #[derive(Parser)]
 struct Opts {
     config_path: PathBuf,
+    #[clap(short = 'p', long)]
+    just_print_password: bool,
 }
 
 #[serde_as]
@@ -34,9 +47,12 @@ struct Opts {
 struct Config {
     matrix_url: Url,
     vpn_name: String,
+    #[cfg(not(target_os = "macos"))]
     username: String,
     #[serde_as(as = "DisplayFromStr")]
     password: Password,
+    #[cfg(target_os = "macos")]
+    secret: String,
 }
 
 #[derive(Debug)]
