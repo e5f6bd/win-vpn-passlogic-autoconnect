@@ -1,8 +1,9 @@
 use std::{path::PathBuf, process::Command, str::FromStr};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use clap::Parser;
 use deranged::RangedU8;
+use dirs::config_dir;
 use itertools::Itertools;
 use lazy_format::lazy_format;
 use scraper::{Html, Selector};
@@ -12,7 +13,10 @@ use url::Url;
 
 fn main() -> anyhow::Result<()> {
     let args = Opts::parse();
-    let config: Config = toml::from_str(&fs_err::read_to_string(args.config_path)?)?;
+    let config_path = (args.config_path)
+        .or_else(|| Some(config_dir()?.join("wvpa.toml")))
+        .context("Please specify config_path.")?;
+    let config: Config = toml::from_str(&fs_err::read_to_string(config_path)?)?;
     let matrix = Matrix::fetch(config.matrix_url)?;
     let password = config.password.generate(matrix);
     if args.just_print_password {
@@ -37,7 +41,7 @@ fn main() -> anyhow::Result<()> {
 
 #[derive(Parser)]
 struct Opts {
-    config_path: PathBuf,
+    config_path: Option<PathBuf>,
     #[clap(short = 'p', long)]
     just_print_password: bool,
 }
